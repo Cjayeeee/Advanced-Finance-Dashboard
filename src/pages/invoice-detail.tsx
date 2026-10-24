@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react'
-import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { ArrowLeft, Ban, Copy, Download, FileCheck2, MoreHorizontal, Pencil, Send, Trash2, Undo2, Wallet } from 'lucide-react'
+import { ArrowLeft, Ban, Copy, Download, FileCheck2, MoreHorizontal, Pencil, Printer, Send, Trash2, Undo2, Wallet } from 'lucide-react'
 import { useActiveWorkspace, useApp } from '@/store/app-store'
 import { useFormat } from '@/hooks/use-format'
 import { useLookups } from '@/hooks/use-lookups'
@@ -10,7 +10,7 @@ import { ConfirmDialog } from '@/components/ui/alert-dialog'
 import { Dropdown, DropdownContent, DropdownItem, DropdownSeparator, DropdownTrigger } from '@/components/ui/dropdown'
 import { Switch } from '@/components/ui/switch'
 import { MoneyFigure } from '@/components/money'
-import { InvoicePaper } from '@/features/invoices/invoice-paper'
+import { InvoicePaper, PrintPortal } from '@/features/invoices/invoice-paper'
 import { StatusBadge } from '@/features/invoices/status-badge'
 import { RecordPaymentDialog } from '@/features/invoices/payment-dialog'
 import { nextInvoiceNumber } from '@/features/invoices/utils'
@@ -35,6 +35,18 @@ export default function InvoiceDetailPage() {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [keepPayments, setKeepPayments] = useState(true)
   const [confirmVoid, setConfirmVoid] = useState(false)
+  const [params, setParams] = useSearchParams()
+  const autoPrint = params.get('print') === '1'
+
+  // Opened from the list's "Print" action: print once the invoice has rendered.
+  useEffect(() => {
+    if (!autoPrint) return
+    const t = window.setTimeout(() => {
+      window.print()
+      setParams({}, { replace: true })
+    }, 350)
+    return () => window.clearTimeout(t)
+  }, [autoPrint, setParams])
 
   const inv = data.invoices.find((i) => i.id === id)
   const view = useMemo(() => (inv ? invoiceViews([inv], data.transactions)[0] : null), [inv, data.transactions])
@@ -51,6 +63,12 @@ export default function InvoiceDetailPage() {
     } catch {
       toast.error("Couldn't generate the PDF")
     }
+  }
+
+  const print = () => {
+    document.title = `${inv.number} · ${client?.name ?? ws.name}`
+    window.print()
+    document.title = 'Monetra'
   }
 
   const duplicate = () => {
@@ -99,8 +117,11 @@ export default function InvoiceDetailPage() {
               <Wallet /> Record payment
             </Button>
           )}
+          <Button variant="secondary" onClick={print} title="Print, or choose “Save as PDF” in the print dialog">
+            <Printer /> Print
+          </Button>
           <Button variant="secondary" onClick={pdf}>
-            <Download /> PDF
+            <Download /> Download PDF
           </Button>
           <Dropdown>
             <DropdownTrigger asChild>
@@ -217,6 +238,9 @@ export default function InvoiceDetailPage() {
         </aside>
       </div>
 
+      <PrintPortal>
+        <InvoicePaper invoice={inv} client={client} ws={ws} fromName={user?.name ?? ws.name} fromEmail={ws.businessEmail ?? user?.email} paid={view.paid} />
+      </PrintPortal>
       <RecordPaymentDialog invoice={inv} open={payOpen} onOpenChange={setPayOpen} />
       <ConfirmDialog
         open={confirmVoid}

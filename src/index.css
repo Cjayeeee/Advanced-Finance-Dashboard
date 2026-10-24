@@ -186,8 +186,37 @@
   }
 }
 
+/* Printing an invoice: a copy rendered into #print-root (a direct child of <body>)
+   is the only thing printed, so the app chrome takes no space and no blank pages follow. */
+#print-root {
+  display: none;
+}
+@page {
+  size: A4;
+  margin: 14mm;
+}
 @media print {
+  html,
   body {
-    background: white;
+    background: #fff !important;
+    min-height: 0 !important;
+  }
+  body > *:not(#print-root) {
+    display: none !important;
+  }
+  #print-root {
+    display: block;
+  }
+  #print-root article {
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+    font-size: 11pt;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  #print-root tr,
+  #print-root footer {
+    break-inside: avoid;
   }
 }

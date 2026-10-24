@@ -4,6 +4,21 @@ import { formatDate } from '@/lib/dates'
 import { formatMoney } from '@/lib/money'
 import { LogoMark } from '@/components/logo'
 import { cn } from '@/lib/utils'
+import { useEffect, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+
+/** Mounts children into <body> > #print-root, the only element shown when printing. */
+export function PrintPortal({ children }: { children: ReactNode }) {
+  const [el, setEl] = useState<HTMLElement | null>(null)
+  useEffect(() => {
+    const node = document.createElement('div')
+    node.id = 'print-root'
+    document.body.appendChild(node)
+    setEl(node)
+    return () => node.remove()
+  }, [])
+  return el ? createPortal(children, el) : null
+}
 
 /** Print-like invoice document. Pure presentation — used by the editor preview and the detail page. */
 export function InvoicePaper({ invoice, client, ws, fromName, fromEmail, paid = 0, className }: { invoice: Invoice; client?: Client; ws: Workspace; fromName: string; fromEmail?: string; paid?: number; className?: string }) {

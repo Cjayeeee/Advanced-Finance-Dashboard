@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Download, FileText, MoreHorizontal, Pencil, Plus, Search, Wallet } from 'lucide-react'
+import { Download, FileText, MoreHorizontal, Pencil, Plus, Printer, Search, Wallet } from 'lucide-react'
 import { useActiveWorkspace, useApp } from '@/store/app-store'
 import { useFormat } from '@/hooks/use-format'
 import { useLookups } from '@/hooks/use-lookups'
@@ -259,6 +259,9 @@ function RowMenu({ v, onPay, onPdf }: { v: InvoiceView; onPay: () => void; onPdf
             <Pencil /> Edit
           </DropdownItem>
         )}
+        <DropdownItem onSelect={() => navigate(`/invoices/${v.invoice.id}?print=1`)}>
+          <Printer /> Print
+        </DropdownItem>
         <DropdownItem onSelect={onPdf}>
           <Download /> Download PDF
         </DropdownItem>
