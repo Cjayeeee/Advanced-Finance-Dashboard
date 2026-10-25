@@ -32,6 +32,7 @@ import { useMedia } from '@/hooks/use-media'
 import { CommandPalette } from './command-palette'
 import { HelpDialog } from './help-dialog'
 import { cn } from '@/lib/utils'
+import { useSeo } from '@/lib/seo'
 
 function initials(name: string) {
   return name
@@ -376,6 +377,9 @@ export function AppShell() {
   const [help, setHelp] = useState(false)
   const tx = useTransactionDialog()
   const collapsed = tablet || state!.sidebarCollapsed
+  const { ws } = useActiveWorkspace()
+  // Private app pages: descriptive tab titles, never indexed.
+  useSeo({ title: titleFor(pathname, ws.type === 'startup').title, noindex: true })
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

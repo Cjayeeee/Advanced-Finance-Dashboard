@@ -88,6 +88,27 @@ This is a **frontend-only build**. Data persists in `localStorage`, keyed per us
 3. Keep amounts as `bigint` minor units. Validate on the server with the same Zod schemas (move them to a shared module) or with Postgres check constraints.
 4. Keep `lib/finance.ts` as the single calculation layer (client-side or in an edge function).
 
+
+## SEO & sharing
+
+* **Public landing page at `/`**, pre-rendered to static HTML at build time (`src/entry-prerender.tsx` + `scripts/prerender.mjs`), so crawlers and link previews see the real content without running JavaScript. Signed-in users see the dashboard at the same URL.
+* **Head tags:** title, description, canonical URL, robots, Open Graph and Twitter cards with a 1200×630 share image (`public/og-image.png`), theme colour, web app manifest, SVG/PNG favicons and an Apple touch icon.
+* **Structured data (JSON-LD):** `SoftwareApplication`, `WebSite`, `Organization` and `FAQPage` (generated from the landing page's FAQ, so the two never drift apart).
+* **`robots.txt` and `sitemap.xml`** are generated on every build. Only `/` and `/signup` are listed. Private app pages are disallowed and also carry `noindex, nofollow`.
+* **Per-page titles** such as "Invoices · Monetra" (`src/lib/seo.ts`).
+* **Performance:** charts and other app code are split out of the landing page, the two above-the-fold fonts are preloaded, screenshots are served as responsive WebP with explicit dimensions (no layout shift), and Vercel caches hashed assets for a year.
+* **Lighthouse (landing page):** desktop scores 99 / 100 / 100 / 100 (performance / accessibility / best practices / SEO). Mobile scores about 84 / 100 / 100 / 100 under its slow-4G simulation.
+
+### Set your domain
+
+Canonical URLs, Open Graph URLs and the sitemap use the site URL chosen at build time:
+
+1. `SITE_URL` environment variable, e.g. `https://monetra.app` (set it in Vercel → Project → Settings → Environment Variables when you add a custom domain)
+2. otherwise Vercel's production URL, detected automatically
+3. otherwise `http://localhost:5173`
+
+After deploying, submit `https://<your-domain>/sitemap.xml` in Google Search Console and Bing Webmaster Tools.
+
 ## Design
 
 The reference analysis and the design system are documented in [`docs/DESIGN.md`](docs/DESIGN.md).

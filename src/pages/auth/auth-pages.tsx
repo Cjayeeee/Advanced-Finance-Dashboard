@@ -57,7 +57,9 @@ function AuthLayout({ title, subtitle, children, footer }: { title: string; subt
   return (
     <div className="grid min-h-dvh gap-3 p-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)]">
       <div className="flex flex-col px-3 py-4 sm:px-8 lg:px-14">
-        <Logo />
+        <Link to="/" aria-label="Monetra home" className="self-start rounded-xl">
+          <Logo />
+        </Link>
         <main className="mx-auto flex w-full max-w-[400px] flex-1 flex-col justify-center py-10 animate-rise">
           <h1 className="font-display text-[38px] font-light leading-tight tracking-[-0.03em]">{title}</h1>
           <p className="mt-2 text-[14px] text-muted">{subtitle}</p>

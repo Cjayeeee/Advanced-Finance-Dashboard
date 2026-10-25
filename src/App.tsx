@@ -9,9 +9,11 @@ import { AppShell } from '@/layout/app-shell'
 import { PageSkeleton } from '@/components/page'
 import { LoginPage, SignupPage, ForgotPage } from '@/pages/auth/auth-pages'
 import { OnboardingPage } from '@/pages/auth/onboarding'
-import OverviewPage from '@/pages/overview'
+import LandingPage from '@/pages/landing'
+import { useSeo } from '@/lib/seo'
 
-// Secondary pages are code-split.
+// Pages are code-split so the public landing page doesn't download chart code.
+const OverviewPage = lazy(() => import('@/pages/overview'))
 const TransactionsPage = lazy(() => import('@/pages/transactions'))
 const IncomePage = lazy(() => import('@/pages/income'))
 const ExpensesPage = lazy(() => import('@/pages/expenses'))
@@ -29,6 +31,19 @@ function RequireAuth({ children }: { children: ReactNode }) {
   const { user } = useApp()
   const loc = useLocation()
   if (!user) return <Navigate to="/login" replace state={{ from: loc.pathname }} />
+  return <>{children}</>
+}
+
+/** "/" is the public landing page for visitors and the dashboard for signed-in users. */
+function HomeOrApp() {
+  const { user } = useApp()
+  const loc = useLocation()
+  if (!user) return loc.pathname === '/' ? <LandingPage /> : <Navigate to="/login" replace state={{ from: loc.pathname }} />
+  return <RequireWorkspace />
+}
+
+function Seo({ title, path, noindex, children }: { title: string; path: string; noindex?: boolean; children: ReactNode }) {
+  useSeo({ title, path, noindex })
   return <>{children}</>
 }
 
@@ -58,11 +73,11 @@ export default function App() {
         <Router>
           <Suspense fallback={<div className="p-8"><PageSkeleton /></div>}>
             <Routes>
-              <Route path="/login" element={<PublicOnly><LoginPage /></PublicOnly>} />
-              <Route path="/signup" element={<PublicOnly><SignupPage /></PublicOnly>} />
-              <Route path="/forgot" element={<PublicOnly><ForgotPage /></PublicOnly>} />
-              <Route path="/onboarding" element={<RequireAuth><OnboardingPage /></RequireAuth>} />
-              <Route element={<RequireAuth><RequireWorkspace /></RequireAuth>}>
+              <Route path="/login" element={<PublicOnly><Seo title="Sign in" path="/login" noindex><LoginPage /></Seo></PublicOnly>} />
+              <Route path="/signup" element={<PublicOnly><Seo title="Create your free account" path="/signup"><SignupPage /></Seo></PublicOnly>} />
+              <Route path="/forgot" element={<PublicOnly><Seo title="Reset password" path="/forgot" noindex><ForgotPage /></Seo></PublicOnly>} />
+              <Route path="/onboarding" element={<RequireAuth><Seo title="Set up your workspace" path="/onboarding" noindex><OnboardingPage /></Seo></RequireAuth>} />
+              <Route element={<HomeOrApp />}>
                 <Route index element={<OverviewPage />} />
                 <Route path="transactions" element={<TransactionsPage />} />
                 <Route path="income" element={<IncomePage />} />

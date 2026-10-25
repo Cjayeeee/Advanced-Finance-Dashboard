@@ -1,0 +1,14 @@
+{
+  "name": "Monetra",
+  "short_name": "Monetra",
+  "description": "Income, expense and invoice tracking for freelancers and startups.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ebeae5",
+  "theme_color": "#ebeae5",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
