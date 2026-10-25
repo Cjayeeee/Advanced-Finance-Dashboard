@@ -4,9 +4,11 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { toast } from 'sonner'
-import { ArrowRight, Eye, EyeOff, Rocket, Sparkles, UserRound } from 'lucide-react'
+import { ArrowRight, Eye, EyeOff, MailCheck, Rocket, Sparkles, UserRound } from 'lucide-react'
 import { useApp } from '@/store/app-store'
 import { AuthError, listUsers, resetPassword } from '@/store/auth'
+import { NeedsConfirmation, cloudSendReset, cloudUpdatePassword } from '@/store/cloud'
+import { cloudEnabled } from '@/lib/supabase'
 import { Button } from '@/components/ui/button'
 import { Field, Input } from '@/components/ui/input'
 import { Logo } from '@/components/logo'
@@ -66,7 +68,11 @@ function AuthLayout({ title, subtitle, children, footer }: { title: string; subt
           <div className="mt-8">{children}</div>
           {footer && <div className="mt-6 text-[13.5px] text-muted">{footer}</div>}
         </main>
-        <p className="text-[11.5px] leading-relaxed text-subtle">Local demo build. Accounts and financial data are stored only in this browser, with passwords salted and hashed.</p>
+        <p className="text-[11.5px] leading-relaxed text-subtle">
+          {cloudEnabled
+            ? 'Your account and financial data are stored securely in the cloud and synced across your devices. The demo workspace stays in this browser.'
+            : 'Local build. Accounts and financial data are stored only in this browser, with passwords salted and hashed.'}
+        </p>
       </div>
       <Showcase />
     </div>
@@ -181,7 +187,7 @@ export function LoginPage() {
         <Button type="submit" size="lg" className="mt-2" disabled={formState.isSubmitting}>
           {formState.isSubmitting ? 'Signing in…' : 'Sign in'} <ArrowRight />
         </Button>
-        {!hasUsers && <p className="text-center text-[12.5px] text-subtle">No accounts on this device yet. Create one or try a sample workspace.</p>}
+        {!hasUsers && !cloudEnabled && <p className="text-center text-[12.5px] text-subtle">No accounts on this device yet. Create one or try a sample workspace.</p>}
       </form>
       <DemoButtons />
     </AuthLayout>
@@ -203,7 +209,27 @@ export function SignupPage() {
   const { signup } = useApp()
   const navigate = useNavigate()
   const [error, setError] = useState<string | null>(null)
+  const [confirmEmail, setConfirmEmail] = useState<string | null>(null)
   const { register, handleSubmit, formState } = useForm<z.infer<typeof signupSchema>>({ resolver: zodResolver(signupSchema), mode: 'onTouched' })
+
+  if (confirmEmail)
+    return (
+      <AuthLayout title="Check your email" subtitle="One more step to finish creating your account.">
+        <div className="flex gap-3 rounded-2xl bg-sun-wash p-5 text-[14px] leading-relaxed text-ink-3 ring-1 ring-sun/30">
+          <MailCheck className="mt-0.5 size-5 shrink-0" />
+          <p>
+            We sent a confirmation link to <strong className="font-medium text-ink">{confirmEmail}</strong>. Open it on this device to activate your account. You'll be signed in automatically.
+          </p>
+        </div>
+        <p className="mt-4 text-[13px] text-muted">
+          Didn't get it? Check your spam folder, or{' '}
+          <button className="font-medium text-ink underline-offset-4 hover:underline" onClick={() => setConfirmEmail(null)}>
+            try a different email
+          </button>
+          .
+        </p>
+      </AuthLayout>
+    )
 
   return (
     <AuthLayout
@@ -227,6 +253,7 @@ export function SignupPage() {
             await signup(v.name, v.email, v.password)
             navigate('/onboarding')
           } catch (e) {
+            if (e instanceof NeedsConfirmation) return setConfirmEmail(e.message)
             setError(e instanceof AuthError ? e.message : 'Something went wrong. Please try again.')
           }
         })}
@@ -262,6 +289,11 @@ const forgotSchema = z.object({
 })
 
 export function ForgotPage() {
+  if (cloudEnabled) return <CloudForgot />
+  return <LocalForgot />
+}
+
+function LocalForgot() {
   const navigate = useNavigate()
   const [error, setError] = useState<string | null>(null)
   const { register, handleSubmit, formState } = useForm<z.infer<typeof forgotSchema>>({ resolver: zodResolver(forgotSchema), mode: 'onTouched' })
@@ -307,6 +339,124 @@ export function ForgotPage() {
           <PasswordInput id="password" autoComplete="new-password" {...register('password')} aria-invalid={!!formState.errors.password || undefined} />
         </Field>
         <Button type="submit" size="lg" className="mt-2">
+          Update password
+        </Button>
+      </form>
+    </AuthLayout>
+  )
+}
+
+/* Cloud mode: email a secure reset link, then set the new password on /reset-password. */
+
+const emailOnly = z.object({ email: z.string().trim().email('Enter a valid email address') })
+
+function CloudForgot() {
+  const [sent, setSent] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const { register, handleSubmit, formState } = useForm<z.infer<typeof emailOnly>>({ resolver: zodResolver(emailOnly), mode: 'onTouched' })
+  return (
+    <AuthLayout
+      title="Reset password"
+      subtitle="We'll email you a link to choose a new password."
+      footer={
+        <Link to="/login" className="font-medium text-ink underline-offset-4 hover:underline">
+          ← Back to sign in
+        </Link>
+      }
+    >
+      {sent ? (
+        <div role="status" className="flex gap-3 rounded-2xl bg-sun-wash p-5 text-[14px] leading-relaxed text-ink-3 ring-1 ring-sun/30">
+          <MailCheck className="mt-0.5 size-5 shrink-0" />
+          <p>
+            If an account exists for <strong className="font-medium text-ink">{sent}</strong>, a reset link is on its way. The link expires after an hour.
+          </p>
+        </div>
+      ) : (
+        <form
+          noValidate
+          className="flex flex-col gap-4"
+          onSubmit={handleSubmit(async (v) => {
+            setError(null)
+            try {
+              await cloudSendReset(v.email)
+              setSent(v.email.trim().toLowerCase())
+            } catch (e) {
+              setError(e instanceof AuthError ? e.message : 'Something went wrong. Please try again.')
+            }
+          })}
+        >
+          {error && (
+            <p role="alert" className="rounded-2xl bg-loss-soft px-4 py-3 text-[13px] text-loss">
+              {error}
+            </p>
+          )}
+          <Field label="Email" htmlFor="email" error={formState.errors.email?.message}>
+            <Input id="email" type="email" autoComplete="email" {...register('email')} aria-invalid={!!formState.errors.email || undefined} />
+          </Field>
+          <Button type="submit" size="lg" className="mt-2" disabled={formState.isSubmitting}>
+            {formState.isSubmitting ? 'Sending…' : 'Send reset link'}
+          </Button>
+        </form>
+      )}
+    </AuthLayout>
+  )
+}
+
+const newPassword = z
+  .object({ password: signupSchema.shape.password, confirm: z.string() })
+  .refine((v) => v.password === v.confirm, { path: ['confirm'], message: "Passwords don't match" })
+
+export function ResetPasswordPage() {
+  const { user, ready, passwordRecovery, clearPasswordRecovery } = useApp()
+  const navigate = useNavigate()
+  const [error, setError] = useState<string | null>(null)
+  const { register, handleSubmit, formState } = useForm<z.infer<typeof newPassword>>({ resolver: zodResolver(newPassword), mode: 'onTouched' })
+  const canReset = cloudEnabled && (passwordRecovery || user?.provider === 'cloud')
+
+  if (!cloudEnabled) return <LocalForgot />
+  if (!ready)
+    return (
+      <AuthLayout title="Choose a new password" subtitle="Checking your reset link…">
+        <span />
+      </AuthLayout>
+    )
+  if (!canReset)
+    return (
+      <AuthLayout title="Link expired" subtitle="This reset link is invalid or has already been used.">
+        <Button asChild size="lg">
+          <Link to="/forgot">Send a new link</Link>
+        </Button>
+      </AuthLayout>
+    )
+  return (
+    <AuthLayout title="Choose a new password" subtitle={user ? `For ${user.email}` : 'Set the password you\'ll use to sign in.'}>
+      <form
+        noValidate
+        className="flex flex-col gap-4"
+        onSubmit={handleSubmit(async (v) => {
+          setError(null)
+          try {
+            await cloudUpdatePassword(v.password)
+            clearPasswordRecovery()
+            toast.success('Password updated')
+            navigate('/')
+          } catch (e) {
+            setError(e instanceof AuthError ? e.message : 'Something went wrong. Please try again.')
+          }
+        })}
+      >
+        {error && (
+          <p role="alert" className="rounded-2xl bg-loss-soft px-4 py-3 text-[13px] text-loss">
+            {error}
+          </p>
+        )}
+        <Field label="New password" htmlFor="password" error={formState.errors.password?.message} hint="At least 8 characters, with a letter and a number.">
+          <PasswordInput id="password" autoComplete="new-password" {...register('password')} aria-invalid={!!formState.errors.password || undefined} />
+        </Field>
+        <Field label="Confirm password" htmlFor="confirm" error={formState.errors.confirm?.message}>
+          <PasswordInput id="confirm" autoComplete="new-password" {...register('confirm')} aria-invalid={!!formState.errors.confirm || undefined} />
+        </Field>
+        <Button type="submit" size="lg" className="mt-2" disabled={formState.isSubmitting}>
           Update password
         </Button>
       </form>

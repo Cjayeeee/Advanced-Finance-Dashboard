@@ -21,6 +21,7 @@ import { useApp } from '@/store/app-store'
 import { Logo } from '@/components/logo'
 import { Button } from '@/components/ui/button'
 import { useSeo } from '@/lib/seo'
+import { cloudEnabled } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
 
 const BASE = import.meta.env.BASE_URL
@@ -45,7 +46,12 @@ export const FAQ: { q: string; a: string }[] = [
   { q: 'How does Monetra avoid counting an invoice payment twice?', a: 'An invoice is not revenue on its own. When you record a payment, Monetra creates one income transaction linked to that invoice, and the invoice balance is calculated from those payments. The money is counted exactly once.' },
   { q: 'Are transfers between my own accounts counted as income or expenses?', a: 'No. Transfers change account balances but are excluded from income, expenses and profit.' },
   { q: 'Can I export my data?', a: 'Yes. Transactions, invoices and every report export to CSV, invoices can be printed or downloaded as PDF, and you can download a full JSON backup of a workspace.' },
-  { q: 'Where is my data stored?', a: 'In this version, your data is saved in your own browser on your device, separately for each account and workspace. It is not uploaded to a server, so export a backup regularly.' },
+  {
+    q: 'Where is my data stored?',
+    a: cloudEnabled
+      ? 'In your own account in the cloud, protected so that only you can read or change your records, and synced across your devices. You can export everything to CSV or a JSON backup at any time.'
+      : 'In this version, your data is saved in your own browser on your device, separately for each account and workspace. It is not uploaded to a server, so export a backup regularly.',
+  },
   { q: 'Does Monetra file taxes or connect to my bank?', a: 'No. Reports are simple cash-basis summaries, not statutory statements or tax filings, and transactions are entered by you rather than imported from a bank.' },
 ]
 
@@ -283,7 +289,7 @@ export default function LandingPage() {
           </nav>
         </div>
         <p className="mx-auto flex max-w-[1200px] items-center gap-1.5 px-4 pb-8 text-[11.5px] text-subtle sm:px-6">
-          <Lock className="size-3" /> © {new Date().getFullYear()} Monetra. Your data stays in your browser.
+          <Lock className="size-3" /> © {new Date().getFullYear()} Monetra. {cloudEnabled ? 'Your records are private to your account.' : 'Your data stays in your browser.'}
         </p>
       </footer>
     </div>

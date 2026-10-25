@@ -1,4 +1,5 @@
 import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { useApp } from '@/store/app-store'
 
 const SHORTCUTS = [
   ['N', 'Add a transaction'],
@@ -19,6 +20,7 @@ const DEFINITIONS: [string, string][] = [
 ]
 
 export function HelpDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const { cloud } = useApp()
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent title="Help & support" description="How Monetra calculates your numbers, plus a few shortcuts.">
@@ -41,7 +43,11 @@ export function HelpDialog({ open, onOpenChange }: { open: boolean; onOpenChange
           ))}
         </dl>
         <div className="mt-4 rounded-2xl bg-sun-wash p-4 text-[13px] leading-relaxed text-ink-3 ring-1 ring-sun/30">
-          <strong className="font-medium text-ink">About this build.</strong> Your data is saved in this browser (localStorage), separately for each account and workspace. There are no bank connections, payment processing or email delivery. Export a CSV from Settings → Data to back up your records.
+          <strong className="font-medium text-ink">Where your data lives.</strong>{' '}
+          {cloud
+            ? 'Your records are synced to your account in the cloud, with a copy kept on this device for speed. Only you can access them.'
+            : 'Your data is saved in this browser (localStorage), separately for each account and workspace.'}{' '}
+          There are no bank connections, payment processing or invoice emailing. Export a CSV or a backup from Settings → Data at any time.
         </div>
       </DialogContent>
     </Dialog>

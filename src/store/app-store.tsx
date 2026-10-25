@@ -20,6 +20,8 @@ import { sampleWorkspace } from '@/data/seed'
 import { uid } from '@/lib/id'
 import { readJSON, writeJSON, removeKey } from './storage'
 import * as auth from './auth'
+import * as cloud from './cloud'
+import { cloudEnabled, supabase } from '@/lib/supabase'
 
 const STATE_VERSION = 1
 const userKey = (id: string) => `u:${id}`
@@ -54,17 +56,26 @@ export interface CreateWorkspaceInput {
 
 type DataUpdater = (d: WorkspaceData) => WorkspaceData
 
+export type SyncStatus = 'local' | 'loading' | 'saving' | 'saved' | 'offline' | 'error'
+
 interface AppContextValue {
   user: User | null
   state: UserState | null
+  /** False only while a cloud session is being restored on first load. */
   ready: boolean
   saveError: boolean
+  /** 'local' = browser-only account or demo; the rest describe cloud sync. */
+  syncStatus: SyncStatus
+  cloud: boolean
+  /** True after the user opened a password-reset link from their email. */
+  passwordRecovery: boolean
+  clearPasswordRecovery: () => void
   // auth
   login: (email: string, password: string) => Promise<void>
   signup: (name: string, email: string, password: string) => Promise<void>
   loginDemo: (type?: WorkspaceType) => Promise<void>
   logout: () => void
-  updateProfile: (patch: { name?: string; email?: string }) => void
+  updateProfile: (patch: { name?: string; email?: string }) => Promise<{ emailPending: boolean }>
   // workspace-level
   createWorkspace: (input: CreateWorkspaceInput) => string
   switchWorkspace: (id: string) => void
@@ -83,12 +94,23 @@ interface AppContextValue {
 const AppContext = createContext<AppContextValue | null>(null)
 
 export function AppProvider({ children }: { children: ReactNode }) {
+  // A local session (browser-only account or the demo) is restored synchronously; a cloud session asynchronously.
   const [user, setUser] = useState<User | null>(() => auth.getSessionUser())
   const [state, setState] = useState<UserState | null>(() => (user ? loadUserState(user.id) : null))
+  const [ready, setReady] = useState(() => !cloudEnabled || !!user)
   const [saveError, setSaveError] = useState(false)
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('local')
+  const [passwordRecovery, setPasswordRecovery] = useState(false)
   const saveTimer = useRef<number | undefined>(undefined)
+  const remoteTimer = useRef<number | undefined>(undefined)
+  /** Last state known to be on the server, to skip echo saves and detect changes from other devices. */
+  const lastRemote = useRef<{ json: string; updatedAt: string } | null>(null)
+  /** Cloud saves are held back until the server copy has been loaded, so a stale cache can't overwrite it. */
+  const hydrated = useRef(false)
+  const dirty = useRef(false)
+  const isCloud = user?.provider === 'cloud'
 
-  // Persist (debounced) — always keyed to the signed-in user.
+  // Local cache (debounced) — always keyed to the signed-in user. For cloud users this makes reloads instant.
   useEffect(() => {
     if (!user || !state) return
     window.clearTimeout(saveTimer.current)
@@ -96,20 +118,143 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => window.clearTimeout(saveTimer.current)
   }, [user, state])
 
-  // Flush on tab close.
+  // Flush the local cache on tab close.
   useEffect(() => {
     const flush = () => user && state && writeJSON(userKey(user.id), state)
     window.addEventListener('beforeunload', flush)
     return () => window.removeEventListener('beforeunload', flush)
   }, [user, state])
 
+  const pushRemote = useCallback(async (uid: string, s: UserState) => {
+    const json = JSON.stringify(s)
+    try {
+      const updatedAt = await cloud.saveRemoteState(uid, s)
+      lastRemote.current = { json, updatedAt }
+      dirty.current = false
+      setSyncStatus('saved')
+    } catch {
+      setSyncStatus(typeof navigator !== 'undefined' && !navigator.onLine ? 'offline' : 'error')
+    }
+  }, [])
+
+  // Cloud save (debounced 800ms after the last change).
+  useEffect(() => {
+    if (!user || !state || user.provider !== 'cloud' || !hydrated.current) return
+    if (lastRemote.current?.json === JSON.stringify(state)) return
+    dirty.current = true
+    setSyncStatus('saving')
+    window.clearTimeout(remoteTimer.current)
+    const uid = user.id
+    remoteTimer.current = window.setTimeout(() => void pushRemote(uid, state), 800)
+    return () => window.clearTimeout(remoteTimer.current)
+  }, [user, state, pushRemote])
+
+  const startCloudSession = useCallback(async (u: User) => {
+    auth.signOut() // drop any local/demo session
+    hydrated.current = false
+    lastRemote.current = null
+    const cached = readJSON<UserState | null>(userKey(u.id), null)
+    setUser(u)
+    setState(cached && cached.version === STATE_VERSION ? cached : initialUserState())
+    setSyncStatus('loading')
+    try {
+      const remote = await cloud.loadRemoteState(u.id)
+      if (remote && remote.state?.version === STATE_VERSION) {
+        lastRemote.current = { json: JSON.stringify(remote.state), updatedAt: remote.updatedAt }
+        setState(remote.state)
+        setSyncStatus('saved')
+      } else {
+        // First cloud sign-in: bring over this browser's data (cached copy, or a local account with the same email).
+        let initial: UserState | null = cached && cached.version === STATE_VERSION ? cached : null
+        if (!initial) {
+          const local = auth.listUsers().find((x) => x.email === u.email && x.email !== auth.DEMO_EMAIL)
+          if (local) initial = loadUserState(local.id)
+        }
+        setState({ ...(initial ?? initialUserState()) }) // new object → triggers the first upload
+      }
+      hydrated.current = true
+    } catch {
+      setSyncStatus('offline') // keep working from the cached copy; we retry when the connection returns
+    }
+  }, [])
+
+  // Restore a cloud session, and listen for auth events (email links, sign-out in another tab, profile updates).
+  useEffect(() => {
+    if (!supabase) return
+    let active = true
+    supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (!active) return
+        if (data.session?.user && !auth.getSessionUser()) void startCloudSession(cloud.toUser(data.session.user))
+        setReady(true)
+      })
+      .catch(() => setReady(true))
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') setPasswordRecovery(true)
+      if (event === 'SIGNED_OUT') setUser((u) => (u?.provider === 'cloud' ? null : u))
+      if (event === 'USER_UPDATED' && session?.user) setUser((u) => (u?.provider === 'cloud' ? cloud.toUser(session.user) : u))
+    })
+    return () => {
+      active = false
+      sub.subscription.unsubscribe()
+    }
+  }, [startCloudSession])
+
+  // Pick up changes made on another device when this tab comes back into view; retry when back online.
+  useEffect(() => {
+    if (!isCloud || !user) return
+    const uid = user.id
+    const refresh = async () => {
+      if (document.visibilityState !== 'visible') return
+      if (!hydrated.current) {
+        // An earlier load failed (offline) — try again.
+        const u = user
+        return void startCloudSession(u)
+      }
+      if (dirty.current) return
+      try {
+        const r = await cloud.loadRemoteState(uid)
+        if (r && r.updatedAt !== lastRemote.current?.updatedAt && r.state?.version === STATE_VERSION) {
+          lastRemote.current = { json: JSON.stringify(r.state), updatedAt: r.updatedAt }
+          setState(r.state)
+        }
+      } catch {
+        /* stay on the current copy */
+      }
+    }
+    const online = () => {
+      if (!hydrated.current) return void startCloudSession(user)
+      if (dirty.current) setState((s) => (s ? { ...s } : s)) // re-trigger the debounced save
+    }
+    document.addEventListener('visibilitychange', refresh)
+    window.addEventListener('online', online)
+    return () => {
+      document.removeEventListener('visibilitychange', refresh)
+      window.removeEventListener('online', online)
+    }
+  }, [isCloud, user, startCloudSession])
+
   const startSession = useCallback((u: User) => {
     setUser(u)
     setState(loadUserState(u.id))
+    setSyncStatus('local')
   }, [])
 
-  const login = useCallback(async (email: string, password: string) => startSession(await auth.signIn(email, password)), [startSession])
-  const signup = useCallback(async (name: string, email: string, password: string) => startSession(await auth.signUp(name, email, password)), [startSession])
+  const login = useCallback(
+    async (email: string, password: string) => {
+      if (cloudEnabled) await startCloudSession(await cloud.cloudSignIn(email, password))
+      else startSession(await auth.signIn(email, password))
+    },
+    [startSession, startCloudSession],
+  )
+  const signup = useCallback(
+    async (name: string, email: string, password: string) => {
+      if (cloudEnabled) await startCloudSession(await cloud.cloudSignUp(name, email, password))
+      else startSession(await auth.signUp(name, email, password))
+    },
+    [startSession, startCloudSession],
+  )
 
   const loginDemo = useCallback(async (type: WorkspaceType = 'freelancer') => {
     const u = await auth.ensureDemoUser()
@@ -124,23 +269,46 @@ export function AppProvider({ children }: { children: ReactNode }) {
     writeJSON(userKey(u.id), s)
     setUser(u)
     setState(s)
+    setSyncStatus('local')
   }, [])
 
   const logout = useCallback(() => {
-    if (user && state) writeJSON(userKey(user.id), state)
-    auth.signOut()
+    const u = user
+    const s = state
+    // Clear the UI first so navigation happens immediately; finish syncing in the background.
     setUser(null)
     setState(null)
+    setPasswordRecovery(false)
+    if (u?.provider === 'cloud') {
+      window.clearTimeout(remoteTimer.current)
+      const pending = dirty.current && hydrated.current && s ? cloud.saveRemoteState(u.id, s).catch(() => undefined) : Promise.resolve()
+      hydrated.current = false
+      lastRemote.current = null
+      dirty.current = false
+      removeKey(userKey(u.id)) // don't leave financial data cached on a shared device
+      void pending.then(() => cloud.cloudSignOut())
+    } else {
+      if (u && s) writeJSON(userKey(u.id), s)
+      auth.signOut()
+    }
   }, [user, state])
 
   const updateProfile = useCallback(
-    (patch: { name?: string; email?: string }) => {
-      if (!user) return
+    async (patch: { name?: string; email?: string }) => {
+      if (!user) return { emailPending: false }
+      if (user.provider === 'cloud') {
+        const r = await cloud.cloudUpdateProfile({ name: patch.name, email: patch.email && patch.email.toLowerCase() !== user.email ? patch.email : undefined })
+        setUser(r.user)
+        return { emailPending: r.emailPending }
+      }
       auth.updateUserProfile(user.id, patch)
       setUser(auth.getSessionUser())
+      return { emailPending: false }
     },
     [user],
   )
+
+  const clearPasswordRecovery = useCallback(() => setPasswordRecovery(false), [])
 
   const patchState = useCallback((fn: (s: UserState) => UserState) => setState((s) => (s ? fn(s) : s)), [])
 
@@ -241,8 +409,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     () => ({
       user,
       state,
-      ready: true,
+      ready,
       saveError,
+      syncStatus,
+      cloud: isCloud,
+      passwordRecovery,
+      clearPasswordRecovery,
       login,
       signup,
       loginDemo,
@@ -260,7 +432,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       completeStep,
       updateData,
     }),
-    [user, state, saveError, login, signup, loginDemo, logout, updateProfile, createWorkspace, switchWorkspace, updateWorkspace, deleteWorkspace, resetSampleData, clearWorkspaceData, setPrefs, setSidebarCollapsed, markNotificationsRead, completeStep, updateData],
+    [user, state, ready, saveError, syncStatus, isCloud, passwordRecovery, clearPasswordRecovery, login, signup, loginDemo, logout, updateProfile, createWorkspace, switchWorkspace, updateWorkspace, deleteWorkspace, resetSampleData, clearWorkspaceData, setPrefs, setSidebarCollapsed, markNotificationsRead, completeStep, updateData],
   )
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>

@@ -174,6 +174,8 @@ export interface User {
   passwordHash: string
   salt: string
   createdAt: string
+  /** 'cloud' = Supabase account; absent/'local' = browser-only account (also the demo). */
+  provider?: 'local' | 'cloud'
 }
 
 export interface UserState {

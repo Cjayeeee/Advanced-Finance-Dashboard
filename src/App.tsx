@@ -7,10 +7,11 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { TransactionDialogProvider } from '@/features/transactions/transaction-dialog'
 import { AppShell } from '@/layout/app-shell'
 import { PageSkeleton } from '@/components/page'
-import { LoginPage, SignupPage, ForgotPage } from '@/pages/auth/auth-pages'
+import { LoginPage, SignupPage, ForgotPage, ResetPasswordPage } from '@/pages/auth/auth-pages'
 import { OnboardingPage } from '@/pages/auth/onboarding'
 import LandingPage from '@/pages/landing'
 import { useSeo } from '@/lib/seo'
+import { hasStoredCloudSession } from '@/lib/supabase'
 
 // Pages are code-split so the public landing page doesn't download chart code.
 const OverviewPage = lazy(() => import('@/pages/overview'))
@@ -27,17 +28,29 @@ const SettingsPage = lazy(() => import('@/pages/settings'))
 // 'memory' is for embedded/hosted demos where the page can't own the address bar.
 const Router = import.meta.env.VITE_ROUTER === 'memory' ? MemoryRouter : import.meta.env.VITE_ROUTER === 'hash' ? HashRouter : BrowserRouter
 
+function Restoring() {
+  return (
+    <div className="grid min-h-dvh place-items-center" role="status" aria-label="Signing you in">
+      <div className="flex items-center gap-3 text-[13.5px] text-muted">
+        <span className="size-2 animate-ping rounded-full bg-sun-deep" /> Signing you in…
+      </div>
+    </div>
+  )
+}
+
 function RequireAuth({ children }: { children: ReactNode }) {
-  const { user } = useApp()
+  const { user, ready } = useApp()
   const loc = useLocation()
+  if (!ready) return <Restoring />
   if (!user) return <Navigate to="/login" replace state={{ from: loc.pathname }} />
   return <>{children}</>
 }
 
 /** "/" is the public landing page for visitors and the dashboard for signed-in users. */
 function HomeOrApp() {
-  const { user } = useApp()
+  const { user, ready } = useApp()
   const loc = useLocation()
+  if (!user && !ready) return loc.pathname === '/' && !hasStoredCloudSession() ? <LandingPage /> : <Restoring />
   if (!user) return loc.pathname === '/' ? <LandingPage /> : <Navigate to="/login" replace state={{ from: loc.pathname }} />
   return <RequireWorkspace />
 }
@@ -61,7 +74,8 @@ function RequireWorkspace() {
 }
 
 function PublicOnly({ children }: { children: ReactNode }) {
-  const { user } = useApp()
+  const { user, ready } = useApp()
+  if (!ready) return <Restoring />
   if (user) return <Navigate to="/" replace />
   return <>{children}</>
 }
@@ -76,6 +90,7 @@ export default function App() {
               <Route path="/login" element={<PublicOnly><Seo title="Sign in" path="/login" noindex><LoginPage /></Seo></PublicOnly>} />
               <Route path="/signup" element={<PublicOnly><Seo title="Create your free account" path="/signup"><SignupPage /></Seo></PublicOnly>} />
               <Route path="/forgot" element={<PublicOnly><Seo title="Reset password" path="/forgot" noindex><ForgotPage /></Seo></PublicOnly>} />
+              <Route path="/reset-password" element={<Seo title="Choose a new password" path="/reset-password" noindex><ResetPasswordPage /></Seo>} />
               <Route path="/onboarding" element={<RequireAuth><Seo title="Set up your workspace" path="/onboarding" noindex><OnboardingPage /></Seo></RequireAuth>} />
               <Route element={<HomeOrApp />}>
                 <Route index element={<OverviewPage />} />

@@ -104,7 +104,8 @@ function Unavailable({ title, body }: { title: string; body: string }) {
 /* ─────────────────────────── Profile ─────────────────────────── */
 
 function ProfileSection() {
-  const { user, updateProfile } = useApp()
+  const { user, updateProfile, cloud } = useApp()
+  const [busy, setBusy] = useState(false)
   const [name, setName] = useState(user?.name ?? '')
   const [email, setEmail] = useState(user?.email ?? '')
   const emailBad = !/^\S+@\S+\.\S+$/.test(email)
@@ -114,11 +115,19 @@ function ProfileSection() {
         <form
           className="grid max-w-xl gap-4 sm:grid-cols-2"
           noValidate
-          onSubmit={(e) => {
+          onSubmit={async (e) => {
             e.preventDefault()
             if (name.trim().length < 2 || emailBad) return toast.error('Check your name and email')
-            updateProfile({ name: name.trim(), email: email.trim() })
-            toast.success('Profile updated')
+            setBusy(true)
+            try {
+              const r = await updateProfile({ name: name.trim(), email: email.trim() })
+              if (r.emailPending) toast.success('Check your inbox', { description: `Confirm the change using the link sent to ${email.trim()}.` })
+              else toast.success('Profile updated')
+            } catch (err) {
+              toast.error(err instanceof Error ? err.message : "Couldn't update your profile")
+            } finally {
+              setBusy(false)
+            }
           }}
         >
           <Field label="Full name" htmlFor="p-name" error={name.trim().length < 2 ? 'Enter your name' : undefined}>
@@ -128,14 +137,20 @@ function ProfileSection() {
             <Input id="p-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
           </Field>
           <div className="sm:col-span-2">
-            <Button type="submit">Save profile</Button>
+            <Button type="submit" disabled={busy}>
+              {busy ? 'Saving…' : 'Save profile'}
+            </Button>
           </div>
         </form>
       </Section>
       <Section title="Security">
         <div className="flex flex-col gap-3">
-          <p className="text-[13px] text-muted">Passwords are salted and hashed (PBKDF2) before storage in this browser. To change yours, sign out and use “Forgot password”.</p>
-          <Unavailable title="Two-factor authentication" body="Requires a hosted authentication backend. Not available in this local build." />
+          {cloud ? (
+            <p className="text-[13px] text-muted">Your account is managed by secure cloud sign-in, and your data is synced to your account. Each user can only ever access their own records. To change your password, sign out and use “Forgot password”, and we'll email you a reset link.</p>
+          ) : (
+            <p className="text-[13px] text-muted">Passwords are salted and hashed (PBKDF2) before storage in this browser. To change yours, sign out and use “Forgot password”.</p>
+          )}
+          <Unavailable title="Two-factor authentication" body="Not available yet." />
         </div>
       </Section>
     </>

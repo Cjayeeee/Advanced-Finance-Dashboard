@@ -129,6 +129,25 @@ function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
   )
 }
 
+function SyncIndicator({ collapsed }: { collapsed: boolean }) {
+  const { syncStatus, cloud } = useApp()
+  if (!cloud) return null
+  const meta = {
+    local: { dot: 'bg-subtle', label: 'On this device' },
+    loading: { dot: 'bg-sun-deep animate-pulse', label: 'Loading your data…' },
+    saving: { dot: 'bg-sun-deep animate-pulse', label: 'Saving…' },
+    saved: { dot: 'bg-gain', label: 'All changes saved' },
+    offline: { dot: 'bg-subtle', label: 'Offline. Changes saved on this device' },
+    error: { dot: 'bg-loss', label: "Couldn't sync. Retrying when you return" },
+  }[syncStatus]
+  return (
+    <p className={cn('flex items-center gap-2 px-2 text-[11.5px] text-muted', collapsed && 'justify-center px-0')} role="status" aria-live="polite" title={meta.label}>
+      <span className={cn('size-1.5 shrink-0 rounded-full', meta.dot)} aria-hidden />
+      {collapsed ? <span className="sr-only">{meta.label}</span> : meta.label}
+    </p>
+  )
+}
+
 function UserMenu({ collapsed, onHelp }: { collapsed: boolean; onHelp: () => void }) {
   const { user, logout } = useApp()
   const navigate = useNavigate()
@@ -202,6 +221,7 @@ function Sidebar({ collapsed, onToggle, onHelp }: { collapsed: boolean; onToggle
       </div>
       <div className="flex flex-col gap-2 pt-3">
         <WorkspaceSwitcher collapsed={collapsed} />
+        <SyncIndicator collapsed={collapsed} />
         <UserMenu collapsed={collapsed} onHelp={onHelp} />
       </div>
     </aside>
@@ -230,6 +250,7 @@ function MobileDrawer({ open, onOpenChange, onHelp }: { open: boolean; onOpenCha
           </div>
           <div className="flex flex-col gap-2 pt-3">
             <WorkspaceSwitcher collapsed={false} />
+            <SyncIndicator collapsed={false} />
             <UserMenu collapsed={false} onHelp={onHelp} />
           </div>
         </D.Content>

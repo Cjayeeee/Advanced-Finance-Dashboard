@@ -75,19 +75,35 @@ src/
   pages/       one file per route (secondary pages are lazy-loaded)
 ```
 
-## Persistence & security (this build)
+## Data storage: local or Supabase
 
-This is a **frontend-only build**. Data persists in `localStorage`, keyed per user (`monetra:u:<userId>`) and per workspace, so one account never sees another's records in the UI. Passwords are salted and hashed with PBKDF2 (Web Crypto). This is **not** a security boundary: anyone with access to the browser profile can read local storage. There are no bank connections, payment processing or email delivery, and the UI says so wherever it's relevant (for example, "Mark as sent" never claims to email anything).
+Monetra runs in one of two modes, chosen by environment variables:
 
-### Going to production
+| | **Local mode** (no keys set) | **Cloud mode** (Supabase keys set) |
+| --- | --- | --- |
+| Accounts | Browser-only, PBKDF2-hashed passwords | Supabase Auth: real sign-up, email confirmation, reset links |
+| Data | `localStorage`, per user and workspace | `public.user_state` table, one JSON document per user, plus a local cache for speed |
+| Security | None beyond the browser profile | Row Level Security: a user can only read or write their own row |
+| Devices | This browser only | Synced across devices; changes from another device load when you return to the tab |
+| Demo workspaces | Local | Still local (no account needed) |
 
-`docs/supabase-schema.sql` is a reference schema with row-level security. To migrate:
+### Set up Supabase (cloud mode)
 
-1. Replace `src/store/auth.ts` with Supabase Auth (email/password + reset links).
-2. Replace the `updateData` mutations in `app-store.tsx` with Supabase queries (keep the same action names; the pages won't change).
-3. Keep amounts as `bigint` minor units. Validate on the server with the same Zod schemas (move them to a shared module) or with Postgres check constraints.
-4. Keep `lib/finance.ts` as the single calculation layer (client-side or in an edge function).
+1. **Run the SQL.** In Supabase, open SQL Editor → New query, paste [`supabase/migrations/001_user_state.sql`](supabase/migrations/001_user_state.sql), and click Run. It creates the table and the owner-only policies.
+2. **Copy your keys.** In Project Settings → API (or the green **Connect** button), copy the **Project URL** and the **anon / publishable key**. Never use the `service_role` / secret key in the app.
+3. **Add them locally.** Copy `.env.example` to `.env.local` and fill in:
+   ```
+   VITE_SUPABASE_URL=https://vkddesqcvlxzooqlutdw.supabase.co
+   VITE_SUPABASE_ANON_KEY=<your anon key>
+   ```
+   Restart `npm run dev`.
+4. **Add them on Vercel.** Go to Project → Settings → Environment Variables, add the same two variables, then redeploy.
+5. **Set the auth URLs.** In Authentication → URL Configuration, set **Site URL** to your Vercel URL. Under **Redirect URLs**, add `https://<your-domain>/**` and `http://localhost:5173/**`, so confirmation and password-reset emails link back to the app.
+6. *(Optional)* For quick testing, turn off **Confirm email** under Authentication → Sign In / Providers → Email. For production, configure custom SMTP, because Supabase's built-in email service is rate-limited.
 
+**Existing local data:** the first time you sign in to a cloud account, Monetra uploads this browser's data for a local account with the same email (or this device's cached copy), so nothing is lost.
+
+**How sync works** (`src/store/app-store.tsx`, `src/store/cloud.ts`): changes save to the cloud 0.8 seconds after you stop editing, and the sidebar shows *Saving… / All changes saved / Offline*. Saving waits until the server copy has loaded, so a stale cache can never overwrite it. If the connection drops, changes stay on the device and upload when it returns. Signing out removes the cached copy from that browser. When two devices both edit, the last save wins. Step 2 (normalised tables, see [`docs/supabase-schema.sql`](docs/supabase-schema.sql)) would add per-record merging, team sharing and database-level rules.
 
 ## SEO & sharing
 
